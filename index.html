@@ -12,6 +12,7 @@
             --light-color: #ecf0f1;
             --dark-color: #34495e;
             --success-color: #2ecc71;
+            --warning-color: #f39c12;
         }
         
         * {
@@ -104,6 +105,10 @@
             background-color: var(--success-color);
         }
         
+        .btn-warning {
+            background-color: var(--warning-color);
+        }
+        
         .password-list {
             margin-top: 30px;
         }
@@ -156,9 +161,79 @@
             background-color: var(--accent-color);
         }
         
+        .warning {
+            background-color: var(--warning-color);
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-content {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .close {
+            font-size: 24px;
+            cursor: pointer;
+        }
+        
+        .tab-container {
+            margin-top: 20px;
+        }
+        
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+        }
+        
+        .tab.active {
+            border-bottom: 3px solid var(--secondary-color);
+            font-weight: 600;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
         @media (max-width: 600px) {
             .container {
                 padding: 20px;
+            }
+            
+            .password-actions {
+                flex-direction: column;
             }
         }
     </style>
@@ -188,6 +263,9 @@
         <!-- Login View -->
         <div id="login-view" class="view">
             <h2>Login</h2>
+            <div id="login-error" class="form-group" style="display: none; color: var(--accent-color);">
+                <p id="error-message"></p>
+            </div>
             <div class="form-group">
                 <label for="login-password">Master Password</label>
                 <input type="password" id="login-password" placeholder="Enter your master password" required>
@@ -198,6 +276,7 @@
         <!-- Main App View -->
         <div id="app-view" class="view">
             <button id="logout-btn" class="logout-btn">Logout</button>
+            <button id="settings-btn" style="position: absolute; top: 20px; right: 120px;">Settings</button>
             
             <h2>Add New Password</h2>
             <form id="password-form">
@@ -227,6 +306,62 @@
         </div>
     </div>
     
+    <!-- Warning Modal -->
+    <div id="warning-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Security Warning</h2>
+                <span class="close">&times;</span>
+            </div>
+            <p id="warning-message"></p>
+            <button id="dismiss-warning" class="btn-warning" style="margin-top: 20px;">Dismiss</button>
+        </div>
+    </div>
+    
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <span class="close">&times;</span>
+            </div>
+            
+            <div class="tabs">
+                <div class="tab active" data-tab="change-password">Change Master Password</div>
+                <div class="tab" data-tab="import-export">Import/Export</div>
+            </div>
+            
+            <div class="tab-content active" id="change-password-tab">
+                <div class="form-group">
+                    <label for="current-password">Current Master Password</label>
+                    <input type="password" id="current-password" placeholder="Enter current master password">
+                </div>
+                <div class="form-group">
+                    <label for="new-password">New Master Password</label>
+                    <input type="password" id="new-password" placeholder="Enter new master password">
+                </div>
+                <div class="form-group">
+                    <label for="confirm-new-password">Confirm New Master Password</label>
+                    <input type="password" id="confirm-new-password" placeholder="Confirm new master password">
+                </div>
+                <button id="change-password-btn" class="btn-success">Change Master Password</button>
+            </div>
+            
+            <div class="tab-content" id="import-export-tab">
+                <div class="form-group">
+                    <label for="export-data">Export Data</label>
+                    <textarea id="export-data" readonly placeholder="Export data will appear here"></textarea>
+                    <button id="copy-export-btn" class="btn-success" style="margin-top: 10px;">Copy to Clipboard</button>
+                </div>
+                <div class="form-group">
+                    <label for="import-data">Import Data</label>
+                    <textarea id="import-data" placeholder="Paste your import data here"></textarea>
+                    <button id="import-btn" class="btn-warning" style="margin-top: 10px;">Import Data</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <div id="notification" class="notification"></div>
 
     <script>
@@ -242,6 +377,10 @@
         const loginView = document.getElementById('login-view');
         const appView = document.getElementById('app-view');
         const notification = document.getElementById('notification');
+        const warningModal = document.getElementById('warning-modal');
+        const settingsModal = document.getElementById('settings-modal');
+        const loginError = document.getElementById('login-error');
+        const errorMessage = document.getElementById('error-message');
         
         // Check if we need to set up or login
         document.addEventListener('DOMContentLoaded', initApp);
@@ -253,6 +392,7 @@
                 showView(setupView);
             } else {
                 showView(loginView);
+                checkFailedAttempts();
             }
             
             // Setup event listeners
@@ -260,6 +400,38 @@
             document.getElementById('login-btn').addEventListener('click', login);
             document.getElementById('logout-btn').addEventListener('click', logout);
             document.getElementById('password-form').addEventListener('submit', addPassword);
+            document.getElementById('settings-btn').addEventListener('click', showSettings);
+            document.getElementById('dismiss-warning').addEventListener('click', dismissWarning);
+            document.getElementById('change-password-btn').addEventListener('click', changeMasterPassword);
+            document.getElementById('copy-export-btn').addEventListener('click', copyExportData);
+            document.getElementById('import-btn').addEventListener('click', importData);
+            
+            // Tab functionality
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    // Remove active class from all tabs and content
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    
+                    // Add active class to clicked tab and corresponding content
+                    this.classList.add('active');
+                    document.getElementById(`${this.dataset.tab}-tab`).classList.add('active');
+                });
+            });
+            
+            // Close modals when clicking on X
+            document.querySelectorAll('.close').forEach(closeBtn => {
+                closeBtn.addEventListener('click', function() {
+                    this.closest('.modal').style.display = 'none';
+                });
+            });
+            
+            // Close modals when clicking outside
+            window.addEventListener('click', function(event) {
+                if (event.target.classList.contains('modal')) {
+                    event.target.style.display = 'none';
+                }
+            });
         }
 
         function showView(view) {
@@ -272,14 +444,94 @@
             view.classList.add('active');
         }
 
-        function showNotification(message, isError = false) {
+        function showNotification(message, isError = false, isWarning = false) {
             notification.textContent = message;
             notification.classList.toggle('error', isError);
+            notification.classList.toggle('warning', isWarning);
             notification.style.display = 'block';
             
             setTimeout(() => {
                 notification.style.display = 'none';
             }, 3000);
+        }
+
+        function checkFailedAttempts() {
+            const failedAttempts = localStorage.getItem('failedAttempts');
+            const lastAttemptTime = localStorage.getItem('lastAttemptTime');
+            
+            if (failedAttempts && lastAttemptTime) {
+                const currentTime = Date.now();
+                const timeDiff = currentTime - parseInt(lastAttemptTime);
+                
+                // If there were 5 or more failed attempts and it's been less than 5 minutes
+                if (parseInt(failedAttempts) >= 5 && timeDiff < 300000) {
+                    const timeLeft = Math.ceil((300000 - timeDiff) / 1000);
+                    errorMessage.textContent = `Too many failed attempts. Please wait ${timeLeft} seconds before trying again.`;
+                    loginError.style.display = 'block';
+                    document.getElementById('login-btn').disabled = true;
+                    
+                    // Enable button after timeout
+                    setTimeout(() => {
+                        document.getElementById('login-btn').disabled = false;
+                        loginError.style.display = 'none';
+                    }, 300000 - timeDiff);
+                }
+            }
+        }
+
+        function updateFailedAttempts(isSuccess) {
+            let failedAttempts = parseInt(localStorage.getItem('failedAttempts') || '0');
+            const lastAttemptTime = localStorage.getItem('lastAttemptTime');
+            
+            if (isSuccess) {
+                // Reset on successful login
+                failedAttempts = 0;
+                localStorage.removeItem('failedAttempts');
+                localStorage.removeItem('lastAttemptTime');
+                
+                // Show warning if there were previous failed attempts
+                if (parseInt(localStorage.getItem('previousFailedAttempts') || '0') > 0) {
+                    showFailedAttemptsWarning();
+                }
+            } else {
+                // Increment on failed attempt
+                failedAttempts++;
+                localStorage.setItem('failedAttempts', failedAttempts.toString());
+                localStorage.setItem('lastAttemptTime', Date.now().toString());
+                
+                // If 5 or more failed attempts, start timeout
+                if (failedAttempts >= 5) {
+                    errorMessage.textContent = 'Too many failed attempts. Please wait 5 minutes before trying again.';
+                    loginError.style.display = 'block';
+                    document.getElementById('login-btn').disabled = true;
+                    
+                    // Enable button after 5 minutes
+                    setTimeout(() => {
+                        document.getElementById('login-btn').disabled = false;
+                        loginError.style.display = 'none';
+                    }, 300000);
+                }
+            }
+            
+            // Store previous failed attempts for warning after successful login
+            if (isSuccess && failedAttempts > 0) {
+                localStorage.setItem('previousFailedAttempts', failedAttempts.toString());
+            }
+        }
+
+        function showFailedAttemptsWarning() {
+            const failedAttempts = parseInt(localStorage.getItem('previousFailedAttempts') || '0');
+            const warningMessage = document.getElementById('warning-message');
+            
+            if (failedAttempts > 0) {
+                warningMessage.textContent = `There ${failedAttempts === 1 ? 'was' : 'were'} ${failedAttempts} failed attempt${failedAttempts === 1 ? '' : 's'} to log in.`;
+                warningModal.style.display = 'flex';
+            }
+        }
+
+        function dismissWarning() {
+            warningModal.style.display = 'none';
+            localStorage.removeItem('previousFailedAttempts');
         }
 
         async function setupMasterPassword() {
@@ -350,6 +602,22 @@
                     return;
                 }
                 
+                // Check if we're in timeout
+                const failedAttempts = localStorage.getItem('failedAttempts');
+                const lastAttemptTime = localStorage.getItem('lastAttemptTime');
+                
+                if (failedAttempts && lastAttemptTime) {
+                    const currentTime = Date.now();
+                    const timeDiff = currentTime - parseInt(lastAttemptTime);
+                    
+                    if (parseInt(failedAttempts) >= 5 && timeDiff < 300000) {
+                        const timeLeft = Math.ceil((300000 - timeDiff) / 1000);
+                        errorMessage.textContent = `Too many failed attempts. Please wait ${timeLeft} seconds before trying again.`;
+                        loginError.style.display = 'block';
+                        return;
+                    }
+                }
+                
                 // Derive key from master password
                 const salt = base64ToArrayBuffer(masterKeyData.salt);
                 const derivedKey = await deriveKeyFromPassword(password, salt);
@@ -359,12 +627,16 @@
                 const decryptedKeysJson = await decryptData(encryptedKeys, derivedKey);
                 
                 if (!decryptedKeysJson) {
+                    updateFailedAttempts(false);
                     showNotification('Incorrect master password', true);
                     return;
                 }
                 
                 appState.encryptionKeys = JSON.parse(decryptedKeysJson);
                 appState.isLoggedIn = true;
+                
+                // Reset failed attempts on successful login
+                updateFailedAttempts(true);
                 
                 // Load and decrypt passwords
                 await loadPasswords();
@@ -373,6 +645,7 @@
                 showNotification('Logged in successfully!');
             } catch (error) {
                 console.error('Login error:', error);
+                updateFailedAttempts(false);
                 showNotification('Error during login', true);
             }
         }
@@ -537,9 +810,13 @@
                 
                 // Update localStorage
                 const encryptedPasswords = JSON.parse(localStorage.getItem('encryptedPasswords') || '[]');
-                const updatedEncryptedPasswords = encryptedPasswords.filter((_, index) => {
-                    return appState.passwords[index]; // This is a simplification
-                });
+                const updatedEncryptedPasswords = [];
+                
+                // Re-encrypt all remaining passwords
+                for (const password of appState.passwords) {
+                    const encryptedPassword = await encryptPasswordData(password);
+                    updatedEncryptedPasswords.push(encryptedPassword);
+                }
                 
                 localStorage.setItem('encryptedPasswords', JSON.stringify(updatedEncryptedPasswords));
                 
@@ -548,6 +825,146 @@
             } catch (error) {
                 console.error('Error deleting password:', error);
                 showNotification('Error deleting password', true);
+            }
+        }
+
+        function showSettings() {
+            // Populate export data
+            document.getElementById('export-data').value = generateExportData();
+            
+            // Clear import and password fields
+            document.getElementById('import-data').value = '';
+            document.getElementById('current-password').value = '';
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-new-password').value = '';
+            
+            // Show settings modal
+            settingsModal.style.display = 'flex';
+        }
+
+        function generateExportData() {
+            try {
+                const masterKeyData = localStorage.getItem('masterKeyData');
+                const encryptedPasswords = localStorage.getItem('encryptedPasswords');
+                
+                const exportData = {
+                    masterKeyData: masterKeyData ? JSON.parse(masterKeyData) : null,
+                    encryptedPasswords: encryptedPasswords ? JSON.parse(encryptedPasswords) : []
+                };
+                
+                return JSON.stringify(exportData);
+            } catch (error) {
+                console.error('Error generating export data:', error);
+                return 'Error generating export data';
+            }
+        }
+
+        function copyExportData() {
+            const exportData = document.getElementById('export-data');
+            exportData.select();
+            document.execCommand('copy');
+            showNotification('Export data copied to clipboard');
+        }
+
+        async function importData() {
+            const importDataText = document.getElementById('import-data').value;
+            
+            if (!importDataText) {
+                showNotification('Please paste import data', true);
+                return;
+            }
+            
+            try {
+                const importData = JSON.parse(importDataText);
+                
+                if (!importData.masterKeyData || !importData.encryptedPasswords) {
+                    showNotification('Invalid import data format', true);
+                    return;
+                }
+                
+                // Verify the import data belongs to the current user by checking if we can decrypt it
+                const password = document.getElementById('login-password').value;
+                const salt = base64ToArrayBuffer(importData.masterKeyData.salt);
+                const derivedKey = await deriveKeyFromPassword(password, salt);
+                
+                const encryptedKeys = base64ToArrayBuffer(importData.masterKeyData.encryptedKeys);
+                const decryptedKeysJson = await decryptData(encryptedKeys, derivedKey);
+                
+                if (!decryptedKeysJson) {
+                    showNotification('Import data does not match current master password', true);
+                    return;
+                }
+                
+                // Replace current data with imported data
+                localStorage.setItem('masterKeyData', JSON.stringify(importData.masterKeyData));
+                localStorage.setItem('encryptedPasswords', JSON.stringify(importData.encryptedPasswords));
+                
+                // Reload passwords
+                await loadPasswords();
+                
+                showNotification('Data imported successfully');
+                settingsModal.style.display = 'none';
+            } catch (error) {
+                console.error('Error importing data:', error);
+                showNotification('Error importing data', true);
+            }
+        }
+
+        async function changeMasterPassword() {
+            const currentPassword = document.getElementById('current-password').value;
+            const newPassword = document.getElementById('new-password').value;
+            const confirmNewPassword = document.getElementById('confirm-new-password').value;
+            
+            if (!currentPassword || !newPassword || !confirmNewPassword) {
+                showNotification('Please fill all password fields', true);
+                return;
+            }
+            
+            if (newPassword !== confirmNewPassword) {
+                showNotification('New passwords do not match', true);
+                return;
+            }
+            
+            if (newPassword.length < 8) {
+                showNotification('New password must be at least 8 characters', true);
+                return;
+            }
+            
+            try {
+                // Verify current password
+                const masterKeyData = JSON.parse(localStorage.getItem('masterKeyData'));
+                const salt = base64ToArrayBuffer(masterKeyData.salt);
+                const derivedKey = await deriveKeyFromPassword(currentPassword, salt);
+                
+                const encryptedKeys = base64ToArrayBuffer(masterKeyData.encryptedKeys);
+                const decryptedKeysJson = await decryptData(encryptedKeys, derivedKey);
+                
+                if (!decryptedKeysJson) {
+                    showNotification('Current password is incorrect', true);
+                    return;
+                }
+                
+                // Generate new salt and derive new key
+                const newSalt = crypto.getRandomValues(new Uint8Array(16));
+                const newDerivedKey = await deriveKeyFromPassword(newPassword, newSalt);
+                
+                // Re-encrypt the encryption keys with the new derived key
+                const newEncryptedKeys = await encryptData(
+                    decryptedKeysJson, 
+                    newDerivedKey
+                );
+                
+                // Update master key data
+                masterKeyData.encryptedKeys = arrayBufferToBase64(newEncryptedKeys);
+                masterKeyData.salt = arrayBufferToBase64(newSalt);
+                
+                localStorage.setItem('masterKeyData', JSON.stringify(masterKeyData));
+                
+                showNotification('Master password changed successfully');
+                settingsModal.style.display = 'none';
+            } catch (error) {
+                console.error('Error changing master password:', error);
+                showNotification('Error changing master password', true);
             }
         }
 
