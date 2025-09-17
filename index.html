@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Secure Password Keeper</title>
     <style>
+        /* Your existing CSS remains unchanged */
         :root {
             --primary-color: #2c3e50;
             --secondary-color: #3498db;
@@ -227,6 +228,16 @@
             display: block;
         }
         
+        .debug-info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-family: monospace;
+            font-size: 12px;
+            display: none;
+        }
+        
         @media (max-width: 600px) {
             .container {
                 padding: 20px;
@@ -271,6 +282,8 @@
                 <input type="password" id="login-password" placeholder="Enter your master password" required>
             </div>
             <button id="login-btn">Login</button>
+            <button id="debug-btn" style="margin-top: 10px; background-color: var(--warning-color);">Debug Info</button>
+            <div id="debug-info" class="debug-info"></div>
         </div>
         
         <!-- Main App View -->
@@ -329,6 +342,7 @@
             <div class="tabs">
                 <div class="tab active" data-tab="change-password">Change Master Password</div>
                 <div class="tab" data-tab="import-export">Import/Export</div>
+                <div class="tab" data-tab="troubleshooting">Troubleshooting</div>
             </div>
             
             <div class="tab-content active" id="change-password-tab">
@@ -359,6 +373,12 @@
                     <button id="import-btn" class="btn-warning" style="margin-top: 10px;">Import Data</button>
                 </div>
             </div>
+            
+            <div class="tab-content" id="troubleshooting-tab">
+                <h3>Reset Application</h3>
+                <p>If you're experiencing persistent decryption errors, you may need to reset the application. This will delete all your saved passwords.</p>
+                <button id="reset-app-btn" class="btn-danger" style="margin-top: 10px;">Reset Application</button>
+            </div>
         </div>
     </div>
     
@@ -368,7 +388,7 @@
         // App state
         let appState = {
             isLoggedIn: false,
-            encryptionKeys: null,
+            encryptionKey: null,  // Changed from encryptionKeys to encryptionKey
             passwords: []
         };
 
@@ -381,6 +401,8 @@
         const settingsModal = document.getElementById('settings-modal');
         const loginError = document.getElementById('login-error');
         const errorMessage = document.getElementById('error-message');
+        const debugInfo = document.getElementById('debug-info');
+        const debugBtn = document.getElementById('debug-btn');
         
         // Check if we need to set up or login
         document.addEventListener('DOMContentLoaded', initApp);
@@ -405,6 +427,8 @@
             document.getElementById('change-password-btn').addEventListener('click', changeMasterPassword);
             document.getElementById('copy-export-btn').addEventListener('click', copyExportData);
             document.getElementById('import-btn').addEventListener('click', importData);
+            document.getElementById('reset-app-btn').addEventListener('click', resetApplication);
+            debugBtn.addEventListener('click', toggleDebugInfo);
             
             // Tab functionality
             document.querySelectorAll('.tab').forEach(tab => {
@@ -453,6 +477,26 @@
             setTimeout(() => {
                 notification.style.display = 'none';
             }, 3000);
+        }
+
+        function toggleDebugInfo() {
+            if (debugInfo.style.display === 'block') {
+                debugInfo.style.display = 'none';
+                debugBtn.textContent = 'Debug Info';
+            } else {
+                const masterKeyData = localStorage.getItem('masterKeyData');
+                const encryptedPasswords = localStorage.getItem('encryptedPasswords');
+                
+                debugInfo.innerHTML = `
+                    <strong>LocalStorage Contents:</strong><br>
+                    <strong>masterKeyData:</strong> ${masterKeyData ? 'Exists' : 'Not found'}<br>
+                    <strong>encryptedPasswords:</strong> ${encryptedPasswords ? `Exists (${JSON.parse(encryptedPasswords).length} items)` : 'Not found'}<br>
+                    <strong>failedAttempts:</strong> ${localStorage.getItem('failedAttempts') || '0'}<br>
+                    <strong>lastAttemptTime:</strong> ${localStorage.getItem('lastAttemptTime') || 'Not set'}<br>
+                `;
+                debugInfo.style.display = 'block';
+                debugBtn.textContent = 'Hide Debug Info';
+            }
         }
 
         function checkFailedAttempts() {
@@ -554,23 +598,17 @@
             }
             
             try {
-                // Generate encryption keys
-                const encryptionKeys = await generateEncryptionKeys();
+                // Generate salt
+                const salt = crypto.getRandomValues(new Uint8Array(16));
                 
                 // Derive key from master password
-                const salt = crypto.getRandomValues(new Uint8Array(16));
                 const derivedKey = await deriveKeyFromPassword(password, salt);
                 
-                // Encrypt the encryption keys
-                const encryptedKeys = await encryptData(
-                    JSON.stringify(encryptionKeys), 
-                    derivedKey
-                );
-                
-                // Store the encrypted keys and salt
+                // Store the salt and key verification data
                 const masterKeyData = {
-                    encryptedKeys: arrayBufferToBase64(encryptedKeys),
-                    salt: arrayBufferToBase64(salt)
+                    salt: arrayBufferToBase64(salt),
+                    // Store a verification token to check if the password is correct later
+                    verification: arrayBufferToBase64(await encryptData("verification", derivedKey))
                 };
                 
                 localStorage.setItem('masterKeyData', JSON.stringify(masterKeyData));
@@ -622,17 +660,24 @@
                 const salt = base64ToArrayBuffer(masterKeyData.salt);
                 const derivedKey = await deriveKeyFromPassword(password, salt);
                 
-                // Decrypt the encryption keys
-                const encryptedKeys = base64ToArrayBuffer(masterKeyData.encryptedKeys);
-                const decryptedKeysJson = await decryptData(encryptedKeys, derivedKey);
-                
-                if (!decryptedKeysJson) {
+                // Verify the password is correct by trying to decrypt the verification token
+                try {
+                    const verificationData = base64ToArrayBuffer(masterKeyData.verification);
+                    const decryptedVerification = await decryptData(verificationData, derivedKey);
+                    
+                    if (decryptedVerification !== "verification") {
+                        updateFailedAttempts(false);
+                        showNotification('Incorrect master password', true);
+                        return;
+                    }
+                } catch (e) {
                     updateFailedAttempts(false);
                     showNotification('Incorrect master password', true);
                     return;
                 }
                 
-                appState.encryptionKeys = JSON.parse(decryptedKeysJson);
+                // Store the derived key for encryption/decryption operations
+                appState.encryptionKey = derivedKey;
                 appState.isLoggedIn = true;
                 
                 // Reset failed attempts on successful login
@@ -651,31 +696,8 @@
         }
 
         async function logout() {
-            // Generate new encryption keys for next login
-            const masterKeyData = JSON.parse(localStorage.getItem('masterKeyData'));
-            const password = document.getElementById('login-password').value;
-            
-            if (password && masterKeyData) {
-                try {
-                    const salt = base64ToArrayBuffer(masterKeyData.salt);
-                    const derivedKey = await deriveKeyFromPassword(password, salt);
-                    
-                    const newEncryptionKeys = await generateEncryptionKeys();
-                    const encryptedKeys = await encryptData(
-                        JSON.stringify(newEncryptionKeys), 
-                        derivedKey
-                    );
-                    
-                    // Update the encrypted keys
-                    masterKeyData.encryptedKeys = arrayBufferToBase64(encryptedKeys);
-                    localStorage.setItem('masterKeyData', JSON.stringify(masterKeyData));
-                } catch (error) {
-                    console.error('Key rotation error:', error);
-                }
-            }
-            
             // Clear sensitive data from memory
-            appState.encryptionKeys = null;
+            appState.encryptionKey = null;
             appState.passwords = [];
             appState.isLoggedIn = false;
             
@@ -887,10 +909,15 @@
                 const salt = base64ToArrayBuffer(importData.masterKeyData.salt);
                 const derivedKey = await deriveKeyFromPassword(password, salt);
                 
-                const encryptedKeys = base64ToArrayBuffer(importData.masterKeyData.encryptedKeys);
-                const decryptedKeysJson = await decryptData(encryptedKeys, derivedKey);
-                
-                if (!decryptedKeysJson) {
+                try {
+                    const verificationData = base64ToArrayBuffer(importData.masterKeyData.verification);
+                    const decryptedVerification = await decryptData(verificationData, derivedKey);
+                    
+                    if (decryptedVerification !== "verification") {
+                        showNotification('Import data does not match current master password', true);
+                        return;
+                    }
+                } catch (e) {
                     showNotification('Import data does not match current master password', true);
                     return;
                 }
@@ -936,10 +963,15 @@
                 const salt = base64ToArrayBuffer(masterKeyData.salt);
                 const derivedKey = await deriveKeyFromPassword(currentPassword, salt);
                 
-                const encryptedKeys = base64ToArrayBuffer(masterKeyData.encryptedKeys);
-                const decryptedKeysJson = await decryptData(encryptedKeys, derivedKey);
-                
-                if (!decryptedKeysJson) {
+                try {
+                    const verificationData = base64ToArrayBuffer(masterKeyData.verification);
+                    const decryptedVerification = await decryptData(verificationData, derivedKey);
+                    
+                    if (decryptedVerification !== "verification") {
+                        showNotification('Current password is incorrect', true);
+                        return;
+                    }
+                } catch (e) {
                     showNotification('Current password is incorrect', true);
                     return;
                 }
@@ -948,17 +980,34 @@
                 const newSalt = crypto.getRandomValues(new Uint8Array(16));
                 const newDerivedKey = await deriveKeyFromPassword(newPassword, newSalt);
                 
-                // Re-encrypt the encryption keys with the new derived key
-                const newEncryptedKeys = await encryptData(
-                    decryptedKeysJson, 
-                    newDerivedKey
-                );
+                // Create new verification token
+                const newVerification = arrayBufferToBase64(await encryptData("verification", newDerivedKey));
+                
+                // Re-encrypt all passwords with the new key
+                const encryptedPasswords = JSON.parse(localStorage.getItem('encryptedPasswords') || '[]');
+                const reencryptedPasswords = [];
+                
+                // Temporarily store the current key to decrypt existing passwords
+                const tempKey = appState.encryptionKey;
+                appState.encryptionKey = newDerivedKey;
+                
+                for (const encryptedPassword of encryptedPasswords) {
+                    const passwordData = await decryptPasswordDataWithKey(encryptedPassword, tempKey);
+                    if (passwordData) {
+                        const reencryptedPassword = await encryptPasswordData(passwordData);
+                        reencryptedPasswords.push(reencryptedPassword);
+                    }
+                }
+                
+                // Restore the new key
+                appState.encryptionKey = newDerivedKey;
                 
                 // Update master key data
-                masterKeyData.encryptedKeys = arrayBufferToBase64(newEncryptedKeys);
                 masterKeyData.salt = arrayBufferToBase64(newSalt);
+                masterKeyData.verification = newVerification;
                 
                 localStorage.setItem('masterKeyData', JSON.stringify(masterKeyData));
+                localStorage.setItem('encryptedPasswords', JSON.stringify(reencryptedPasswords));
                 
                 showNotification('Master password changed successfully');
                 settingsModal.style.display = 'none';
@@ -968,36 +1017,25 @@
             }
         }
 
-        // Encryption functions
-        async function generateEncryptionKeys() {
-            const key = await crypto.subtle.generateKey(
-                {
-                    name: 'AES-GCM',
-                    length: 256
-                },
-                true,
-                ['encrypt', 'decrypt']
-            );
-            
-            const exportedKey = await crypto.subtle.exportKey('raw', key);
-            return arrayBufferToBase64(exportedKey);
-        }
-
-        async function getEncryptionKey() {
-            if (!appState.encryptionKeys) {
-                throw new Error('No encryption keys available');
+        function resetApplication() {
+            if (confirm('Are you sure you want to reset the application? This will delete ALL your saved passwords and cannot be undone.')) {
+                localStorage.removeItem('masterKeyData');
+                localStorage.removeItem('encryptedPasswords');
+                localStorage.removeItem('failedAttempts');
+                localStorage.removeItem('lastAttemptTime');
+                localStorage.removeItem('previousFailedAttempts');
+                
+                appState.encryptionKey = null;
+                appState.passwords = [];
+                appState.isLoggedIn = false;
+                
+                showView(setupView);
+                showNotification('Application has been reset');
+                settingsModal.style.display = 'none';
             }
-            
-            const keyData = base64ToArrayBuffer(appState.encryptionKeys);
-            return await crypto.subtle.importKey(
-                'raw',
-                keyData,
-                { name: 'AES-GCM' },
-                false,
-                ['encrypt', 'decrypt']
-            );
         }
 
+        // Encryption functions
         async function deriveKeyFromPassword(password, salt) {
             const encoder = new TextEncoder();
             const passwordBuffer = encoder.encode(password);
@@ -1071,18 +1109,26 @@
         }
 
         async function encryptPasswordData(passwordData) {
-            const key = await getEncryptionKey();
-            const encryptedData = await encryptData(JSON.stringify(passwordData), key);
+            const encryptedData = await encryptData(JSON.stringify(passwordData), appState.encryptionKey);
             return arrayBufferToBase64(encryptedData);
         }
 
         async function decryptPasswordData(encryptedData) {
             try {
-                const key = await getEncryptionKey();
-                const decryptedData = await decryptData(base64ToArrayBuffer(encryptedData), key);
+                const decryptedData = await decryptData(base64ToArrayBuffer(encryptedData), appState.encryptionKey);
                 return JSON.parse(decryptedData);
             } catch (error) {
                 console.error('Error decrypting password:', error);
+                return null;
+            }
+        }
+
+        async function decryptPasswordDataWithKey(encryptedData, key) {
+            try {
+                const decryptedData = await decryptData(base64ToArrayBuffer(encryptedData), key);
+                return JSON.parse(decryptedData);
+            } catch (error) {
+                console.error('Error decrypting password with key:', error);
                 return null;
             }
         }
